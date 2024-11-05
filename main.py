@@ -20,7 +20,6 @@ def encode_building_condition(df):
     '''
 
     hierarchy = ['To restore', 'To renovate', 'To be done up', 'Good', 'Just renovated', 'As new']
-
     building_condition_column = df[['Building condition']]
     # Define and fit the OrdinalEncoder
     encoder = OrdinalEncoder(categories=[hierarchy])
@@ -60,8 +59,6 @@ def split_dataset(df):
     y = df['Price'] # Target variable
     X = df.drop(columns=['Price']) # All other column features in df after dropping the target
     X_train, X_test, y_train, y_test = train_test_split(X,y, random_state=41, test_size=0.2) # Get 4 parameters back
-    print(f"X_train shape: {X_train.shape}")
-    print(f"X_test shape: {X_test.shape}")
     return X_train, X_test, y_train, y_test
 
 
@@ -71,17 +68,45 @@ def standardize_data_features(df):
     X_train_standardized = scaler.fit_transform(X_train)
     X_test_standardized = scaler.transform(
         X_test)  # Uses same mean and standard deviation calculated from the training set to transform the test data
+
+    y_train_standardized = scaler.fit_transform(y_train.values.reshape(-1, 1))
+    y_test_standardized = scaler.transform(y_test.values.reshape(-1, 1))
+
     X_train_standardized = pd.DataFrame(X_train_standardized, columns=X_train.columns)
     X_test_standardized = pd.DataFrame(X_test_standardized, columns=X_test.columns)
 
     # Check mean and standard deviation of the training data after scaling
     print("Means of standardized features (training set):", X_train_standardized.mean(axis=0).values)
     print("Standard deviations of standardized features (training set):", X_train_standardized.std(axis=0).values)
-    return X_train_standardized, X_test_standardized
+    return X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized
+
+def fit_train_linear_regression(X_train, X_test, y_train, y_test):
+    # Fit linear regression model
+    lr = LinearRegression()
+    # Finds the best fit line on the training model (find m (slope) and c (coefficient, y-intercept)) on training parameters
+    lr.fit(X_train, y_train)
+    c = lr.intercept_ # View the fitted and calculated y-intercept
+    m = lr.coef_ # View the fitted and calculated slope value
+    # print(m, c)
+    # Train model and predict scores on test dataset
+    train_score = lr.score(X_train, y_train)
+    test_score = lr.score(X_test, y_test)
+    print(f"Coefficient of determination (R^2) for trained data: {train_score}")
+    print(f"Coefficient of determination (R^2) for test data: {test_score}")
+    y_pred = lr.predict(X_test) # Generate predictions from a fitted liner regression model on new unseen data.
+    # print(y_test)
+    # print(y_pred)
+    lr.score(X_test, y_test)
+    # Calculate Mean Squared Error and R^2 Score from sklearn.metrics import
+    mse = mean_squared_error(y_test, y_pred)
+    root_mse = np.sqrt(mse)
+    print(f"Linear regression Root Mean Squared Error: {root_mse.round(2)}")
+    r2 = r2_score(y_test, y_pred)
+    print("Linear regression Mean Squared Error:", mse.round(2))
+    print("Linear regression R^2 Score:", round(r2, 2))
 
 
-df = pd.read_csv("cleaned_data_with_region_and_price_per_m2.csv")
-print(display(df.head()))
+df = pd.read_csv("Data/cleaned_data_with_region_and_price_per_m2.csv")
 
 # Encode building condition
 df = encode_building_condition(df)
@@ -96,32 +121,12 @@ df = one_hot_encode_columns(df, columns_to_encode) # update the df on each itera
 # Split the dataset: Call the function and assign the returned values to variables
 X_train, X_test, y_train, y_test = split_dataset(df)
 
-standardize_data_features(df)
+X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized = standardize_data_features(df)
 
-# Fit linear regression model
-lr = LinearRegression()
-# Finds the best fit line on the training model (find m (slope) and c (coefficient, y-intercept)) on training parameters
-lr.fit(X_train, y_train)
-c = lr.intercept_ # View the fitted and calculated y-intercept
-m = lr.coef_ # View the fitted and calculated slope value
-print(m, c)
+# Commented out standardized train and test data as did not make an impact on score.
+# fit_train_linear_regression(X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized)
 
-# Train model and predict scores on test dataset
-train_score = lr.score(X_train, y_train)
-test_score = lr.score(X_test, y_test)
-print(f"Coefficient of determination (R^2) for trained data: {train_score}")
-print(f"Coefficient of determination (R^2) for test data: {test_score}")
-y_pred = lr.predict(X_test) # Generate predictions from a fitted liner regression model on new unseen data.
-print(y_test)
-print(y_pred)
-lr.score(X_test, y_test)
-# Calculate Mean Squared Error and R^2 Score from sklearn.metrics import
-mse = mean_squared_error(y_test, y_pred)
-root_mse = np.sqrt(mse)
-print(f"Linear regression Root Mean Squared Error: {root_mse.round(2)}")
-r2 = r2_score(y_test, y_pred)
-print("Linear regression Mean Squared Error:", mse.round(2))
-print("Linear regression R^2 Score:", round(r2, 2))
+fit_train_linear_regression(X_train, X_test, y_train, y_test)
 
 # Random Forest regression model
 regressor_forest = RandomForestRegressor(n_estimators=200, random_state=0)
@@ -129,7 +134,7 @@ regressor_forest.fit(X_train, y_train)
 print(f'Random Forest Regression score before additional parameters: {round(regressor_forest.score(X_test, y_test), 2)}')
 param_grid = {'n_estimators': [30, 50, 100],
               'max_features': [8, 12, 20],
-              'max_depth':[None, 4, 8]
+              'max_depth':[5, 6, 12]
               }
 grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=5, scoring='neg_mean_squared_error', return_train_score=True)
 grid_search.fit(X_train, y_train)
