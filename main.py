@@ -57,7 +57,8 @@ def drop_irrelevant_columns(df, columns_to_drop):
     return clean_df
 
 def preprocess_data(df):
-    """Processes a dataframe including drop irrelevant columns, encode building conditions and column encoding
+    """
+    Processes a dataframe including drop irrelevant columns, encode building conditions and column encoding
      ('Property type', 'Province').
      :param : original df to process
     :return : cleaned dataframe
@@ -71,8 +72,8 @@ def preprocess_data(df):
     # Call one_hot_encode_columns() function
     columns_to_encode = ['Property type', 'Province']
     df_clean = one_hot_encode_columns(df, columns_to_encode)  # update the df on each iteration
-    print(display(df_clean['Property type_house'].head()))
-    print(display(df_clean.head(10)))
+    print(df_clean.head(10))
+    print(f"Column names cleaned dataset: {df_clean.columns}")
     return df_clean
 
 def split_dataset(df):
@@ -106,12 +107,13 @@ def standardize_data_features(df):
     return X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized
 
 def fit_train_linear_regression(X_train, X_test, y_train, y_test):
-    """ Trains a linear regression model on the provided preprocessed dataframe and saves the model to a file.
+    """
+    Trains a linear regression model on the provided preprocessed dataframe and saves the model to a file.
     :param X_train (pandas.DataFrame): Training set
     :param X_test (pandas.DataFrame): Test set
     :param y_train (pandas.Series): Training target (price) variable
     :param y_test (pandas.Series): Testing target variable
-    :return:
+    :return: Creates a .joblib file of the trained linear regression model
     """
     # Fit linear regression model
     lr = LinearRegression()
@@ -137,39 +139,46 @@ def fit_train_linear_regression(X_train, X_test, y_train, y_test):
     joblib.dump(trained_model, 'models/trained_lr_model.joblib')
     return trained_model
 
+def random_forest_model(X_train, X_test, y_train, y_test):
+    """ Trains a random forest model on the provided preprocessed dataframe and saves the model to a file.
+    :param X_train (pandas.DataFrame): Training set
+    :param X_test (pandas.DataFrame): Test set
+    :param y_train (pandas.Series): Training target (price) variable
+    :param y_test (pandas.Series): Testing target variable
+    :return: Creates a .joblib file of the trained linear regression model
+    """
+    regressor_forest = RandomForestRegressor(n_estimators=200, random_state=0)
+    trained_forest_model = regressor_forest.fit(X_train, y_train)
+    print(
+        f'Random Forest Regression score before additional parameters: {round(regressor_forest.score(X_test, y_test), 2)}')
+    param_grid = {'n_estimators': [30, 50, 100],
+                  'max_features': [8, 12, 20],
+                  'max_depth': [5, 6, 12]
+                  }
+    grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=5,
+                               scoring='neg_mean_squared_error', return_train_score=True)
+    grid_search.fit(X_train, y_train)
+    best_forest = grid_search.best_estimator_
+    print(f"Random Forest Regression score after additional parameters: {round(best_forest.score(X_test, y_test), 2)}")
+    y_pred = regressor_forest.predict(X_test)
+    # Calculate Mean Squared Error (MSE)
+    mse_forest = mean_squared_error(y_test, y_pred)
+    root_mse = np.sqrt(mse_forest)
+    print("Random Forest Regression Mean Squared Error:", mse_forest.round(2))
+    print(f'Random Forest Regression Root Mean Squared Error: {root_mse.round(2)}')
+    correlation_matrix = df_clean.corr(method='pearson')
+    price_correlation = correlation_matrix['Price'].sort_values(ascending=False)
+    joblib.dump(trained_forest_model, 'models/trained_rf_model.joblib')
+    print(price_correlation)
 
 df = pd.read_csv("Data/cleaned_data_with_region_and_price_per_m2.csv")
-
 df_clean = preprocess_data(df)
-
 # Split the dataset: Call the function and assign the returned values to variables
 X_train, X_test, y_train, y_test = split_dataset(df_clean)
 
 # X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized = standardize_data_features(df)
-
 # Commented out standardized train and test data as did not make an impact on score.
 # fit_train_linear_regression(X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized)
 
 fit_train_linear_regression(X_train, X_test, y_train, y_test)
-
-# Random Forest regression model
-regressor_forest = RandomForestRegressor(n_estimators=200, random_state=0)
-regressor_forest.fit(X_train, y_train)
-print(f'Random Forest Regression score before additional parameters: {round(regressor_forest.score(X_test, y_test), 2)}')
-param_grid = {'n_estimators': [30, 50, 100],
-              'max_features': [8, 12, 20],
-              'max_depth':[5, 6, 12]
-              }
-grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=5, scoring='neg_mean_squared_error', return_train_score=True)
-grid_search.fit(X_train, y_train)
-best_forest = grid_search.best_estimator_
-print(f"Random Forest Regression score after additional parameters: {round(best_forest.score(X_test, y_test), 2)}")
-y_pred = regressor_forest.predict(X_test)
-# Calculate Mean Squared Error (MSE)
-mse_forest = mean_squared_error(y_test, y_pred)
-root_mse = np.sqrt(mse_forest)
-print("Random Forest Regression Mean Squared Error:", mse_forest.round(2))
-print(f'Random Forest Regression Root Mean Squared Error: {root_mse.round(2)}')
-correlation_matrix = df_clean.corr(method='pearson')
-price_correlation = correlation_matrix['Price'].sort_values(ascending=False)
-print(price_correlation)
+random_forest_model(X_train, X_test, y_train, y_test)
