@@ -6,14 +6,10 @@ import pandas as pd
 rf_model = joblib.load("models/trained_rf_model.joblib")
 
 # Create listing data with column names
-feature_names = [
-    'Number of bedrooms', 'Living area m²', 'Equipped kitchen', 'Furnished',
-    'Swimming pool', 'Encoded Building Condition', 'Property type_house',
-    'Province_Brussels', 'Province_East Flanders', 'Province_Flemish Brabant',
-    'Province_Hainaut', 'Province_Limburg', 'Province_Liège',
-    'Province_Luxembourg', 'Province_Namur', 'Province_Walloon Brabant',
-    'Province_West Flanders'
-]
+feature_names = ['Number of bedrooms', 'Living area m²', 'Equipped kitchen',
+       'Furnished', 'Swimming pool', 'Encoded Building Condition', 'house',
+       'Brussels', 'East Flanders', 'Flemish Brabant', 'Hainaut', 'Limburg',
+       'Liège', 'Luxembourg', 'Namur', 'Walloon Brabant', 'West Flanders']
 
 new_listing = pd.DataFrame(
     [np.array([3, 102, 1, 0, 0, 4, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])],

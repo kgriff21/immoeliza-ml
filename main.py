@@ -1,184 +1,152 @@
 import pandas as pd
 import numpy as np
 import joblib
+from statistics import mean
 from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing import OrdinalEncoder
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestRegressor
-from IPython.display import display
+from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+# Function to visualize feature importance
+# Function to visualize feature importance
+def plot_feature_importance(model, feature_names):
+    # Filter out locality-related features
+    filtered_indices = [i for i, feature in enumerate(feature_names) if not feature.startswith("Locality_")]
+    filtered_importances = model.feature_importances_[filtered_indices]
+    filtered_features = [feature_names[i] for i in filtered_indices]
+    sorted_indices = np.argsort(filtered_importances)[::-1]
+
+    plt.figure(figsize=(10, 6))
+    plt.barh([filtered_features[i] for i in sorted_indices], filtered_importances[sorted_indices], color="skyblue")
+    plt.xlabel("Feature Importance")
+    plt.ylabel("Feature")
+    plt.title("Random Forest Feature Importance (Excluding Locality)")
+    plt.gca().invert_yaxis()
+    plt.show()
+
+# Function to visualize actual vs predicted values
+def plot_actual_vs_predicted(y_test, y_pred):
+    plt.figure(figsize=(8, 8))
+    plt.scatter(y_test, y_pred, alpha=0.5)
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+    plt.xlabel("Actual Values")
+    plt.ylabel("Predicted Values")
+    plt.title("Actual vs Predicted Values")
+    plt.show()
+
+# Function to plot residuals
+def plot_residuals(y_test, y_pred):
+    residuals = y_test - y_pred
+    plt.figure(figsize=(8, 6))
+    plt.scatter(y_test, residuals, alpha=0.5)
+    plt.axhline(y=0, color='r', linestyle='--', lw=2)
+    plt.xlabel("Actual Values")
+    plt.ylabel("Residuals")
+    plt.title("Residual Plot")
+    plt.show()
+
+# Function to encode building condition
 def encode_building_condition(df):
-    """
-    Encodes building condition with OrdinalEncoder, giving hierarcy ranging from 0 - 5:
-    ['To restore', 'To renovate', 'To be done up', 'Good', 'Just renovated', 'As new']
-    This function also drops the column originally titled 'Building Condition'.
-    Parameters:
-    df (DataFrame): The original or modified DataFrame
-    """
     hierarchy = ['To restore', 'To renovate', 'To be done up', 'Good', 'Just renovated', 'As new']
     building_condition_column = df[['Building condition']]
-    # Define and fit the OrdinalEncoder
     encoder = OrdinalEncoder(categories=[hierarchy])
     encoded_building_condition = encoder.fit_transform(building_condition_column)
-    # Add the transformed data back to the DataFrame
     df['Encoded Building Condition'] = encoded_building_condition.ravel()
     df = df.drop(['Building condition'], axis=1)
     return df
 
+# Function to one-hot encode locality
+def one_hot_encode_locality(df):
+    df['Locality Prefix'] = df['Locality data'].astype(str).str[:2]
+    locality_encoder = OneHotEncoder(drop='first', sparse_output=False)
+    encoded_locality = locality_encoder.fit_transform(df[['Locality Prefix']])
+    locality_categories = [f'Locality_{cat}' for cat in locality_encoder.categories_[0][1:]]
+    encoded_locality_df = pd.DataFrame(encoded_locality, columns=locality_categories, index=df.index)
+    df = pd.concat([df, encoded_locality_df], axis=1)
+    df = df.drop(['Locality data', 'Locality Prefix'], axis=1)
+    joblib.dump(locality_encoder, 'models/locality_encoder.joblib')
+    return df
 
+# Function to one-hot encode columns
 def one_hot_encode_columns(df, columns_to_encode):
-    """
-    One-hot encode the specified columns in the DataFrame.
-    :param df (DataFrame): The original DataFrame
-    :param columns_to_encode (list): List of columns to be one-hot encoded
-    :return DataFrame: The DataFrame with the specified columns one-hot encoded and added.
-    """
     for column in columns_to_encode:
         column_data = df[[column]]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
-        encoded_data = encoder.fit_transform(column_data)  # fit_transform applies the encoder
-        encoded_df = pd.DataFrame(encoded_data, columns=encoder.get_feature_names_out([column]))
+        encoded_data = encoder.fit_transform(column_data)
+        categories = encoder.categories_[0][1:]
+        encoded_df = pd.DataFrame(encoded_data, columns=categories, index=df.index)
         df = pd.concat([df, encoded_df], axis=1)
         df = df.drop(column, axis=1)
-    # print(df['Property type'])
-    return df  # return outside the loop to process all columns before returning updated DataFrame
+    return df
 
+# Function to drop irrelevant columns
 def drop_irrelevant_columns(df, columns_to_drop):
-    """ Drop unnecessary columns not needed for the model.
-    :param df: dataframe with encoded columns
-    :param columns_to_drop: Columns with unnecessary data or Nans to be left out of df for model training
-    :return: new df with specified columns dropped
-    """
     clean_df = df.drop(columns_to_drop, axis=1)
     return clean_df
 
+# Function to preprocess data
 def preprocess_data(df):
-    """
-    Processes a dataframe including drop irrelevant columns, encode building conditions and column encoding
-     ('Property type', 'Province').
-     :param : original df to process
-    :return : cleaned dataframe
-     """
-    # Drop unnecessary columns not needed for the model
-    df = drop_irrelevant_columns(df, ['Property ID', 'Open fire', 'Unnamed: 0', 'Locality data', 'Region',
-                                      'Price per m²',
-                                      'Terrace surface m²', 'Garden area m²'])
-    # Encode building condition
+    df = drop_irrelevant_columns(df, ['Property ID', 'Open fire', 'Unnamed: 0', 'Region',
+                                      'Price per m²', 'Terrace surface m²', 'Garden area m²', 'Province'])
     df = encode_building_condition(df)
-    # Call one_hot_encode_columns() function
-    columns_to_encode = ['Property type', 'Province']
-    df_clean = one_hot_encode_columns(df, columns_to_encode)  # update the df on each iteration
-    print(df_clean.head(10))
-    print(f"Column names cleaned dataset: {df_clean.columns}")
+    df = one_hot_encode_locality(df)
+    columns_to_encode = ['Property type']
+    df_clean = one_hot_encode_columns(df, columns_to_encode)
+    df_clean['Price'] = np.log(df_clean['Price'] + 1)
+    pd.set_option('display.width', 0)  # Automatically adjusts to the console width
+    pd.set_option('display.max_columns', None)
+    print(df_clean.head())
     return df_clean
 
+# Function to split dataset
 def split_dataset(df):
-    """
-    Split the dataset into training and test sets.
-    :param: dataframe
-    :return: A tuple of variables for X_train, X_test, y_train, y_test that will be used for model training
-    """
-    y = df['Price'] # Target variable
-    X = df.drop(columns=['Price']) # All other column features in df after dropping the target
-    X_train, X_test, y_train, y_test = train_test_split(X,y, random_state=41, test_size=0.2) # Get 4 parameters back
+    y = df['Price']
+    X = df.drop(columns=['Price'])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=41, test_size=0.2)
     return X_train, X_test, y_train, y_test
 
-
-def standardize_data_features(df):
-    scaler = StandardScaler()
-    X_train, X_test, y_train, y_test = split_dataset(df)
-    X_train_standardized = scaler.fit_transform(X_train)
-    X_test_standardized = scaler.transform(
-        X_test)  # Uses same mean and standard deviation calculated from the training set to transform the test data
-
-    y_train_standardized = scaler.fit_transform(y_train.values.reshape(-1, 1))
-    y_test_standardized = scaler.transform(y_test.values.reshape(-1, 1))
-
-    X_train_standardized = pd.DataFrame(X_train_standardized, columns=X_train.columns)
-    X_test_standardized = pd.DataFrame(X_test_standardized, columns=X_test.columns)
-
-    # Check mean and standard deviation of the training data after scaling
-    print("Means of standardized features (training set):", X_train_standardized.mean(axis=0).values)
-    print("Standard deviations of standardized features (training set):", X_train_standardized.std(axis=0).values)
-    return X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized
-
-def fit_train_linear_regression(X_train, X_test, y_train, y_test):
-    """
-    Trains a linear regression model on the provided preprocessed dataframe and saves the model to a file.
-    :param X_train (pandas.DataFrame): Training set
-    :param X_test (pandas.DataFrame): Test set
-    :param y_train (pandas.Series): Training target (price) variable
-    :param y_test (pandas.Series): Testing target variable
-    :return: Creates a .joblib file of the trained linear regression model
-    """
-    # Fit linear regression model
-    lr = LinearRegression()
-    # Finds the best fit line on the training model (find m (slope) and c (coefficient, y-intercept)) on training parameters
-    trained_model = lr.fit(X_train, y_train)
-    c = lr.intercept_ # View the fitted and calculated y-intercept
-    m = lr.coef_ # View the fitted and calculated slope value
-    # Train model and predict scores on test dataset
-    train_score = lr.score(X_train, y_train)
-    test_score = lr.score(X_test, y_test)
-    print(f"Coefficient of determination (R^2) for trained data: {train_score}")
-    print(f"Coefficient of determination (R^2) for test data: {test_score}")
-    y_pred = lr.predict(X_test) # Generate predictions from a fitted liner regression model on new unseen data.
-    lr.score(X_test, y_test)
-    # Calculate Mean Squared Error and R^2 Score from sklearn.metrics import
-    mse = mean_squared_error(y_test, y_pred)
-    root_mse = np.sqrt(mse)
-    print(f"Linear regression Root Mean Squared Error: {root_mse.round(2)}")
-    r2 = r2_score(y_test, y_pred)
-    print("Linear regression Mean Squared Error:", mse.round(2))
-    print("Linear regression R^2 Score:", round(r2, 2))
-    # Save the trained model using joblib
-    joblib.dump(trained_model, 'models/trained_lr_model.joblib')
-    return trained_model
-
-def random_forest_model(X_train, X_test, y_train, y_test):
-    """ Trains a random forest model on the provided preprocessed dataframe and saves the model to a file.
-    :param X_train (pandas.DataFrame): Training set
-    :param X_test (pandas.DataFrame): Test set
-    :param y_train (pandas.Series): Training target (price) variable
-    :param y_test (pandas.Series): Testing target variable
-    :return: Creates a .joblib file of the trained linear regression model
-    """
-    regressor_forest = RandomForestRegressor(n_estimators=200, random_state=0)
-    trained_forest_model = regressor_forest.fit(X_train, y_train)
-    print(
-        f'Random Forest Regression score before additional parameters: {round(regressor_forest.score(X_test, y_test), 2)}')
-    param_grid = {'n_estimators': [30, 50, 100],
-                  'max_features': [8, 12, 20],
-                  'max_depth': [5, 6, 12]
-                  }
-    grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=5,
-                               scoring='neg_mean_squared_error', return_train_score=True)
+# Integrate visualizations into your random_forest_model function
+def random_forest_model(X_train, X_test, y_train, y_test, feature_names):
+    regressor_forest = RandomForestRegressor(n_estimators=200, random_state=42)
+    param_grid = {
+        'n_estimators': [100, 200],
+        'max_features': ['sqrt', 'log2'],
+        'max_depth': [10, 20, None],
+        'min_samples_split': [2, 10],
+        'min_samples_leaf': [1, 4],
+        'bootstrap': [True]
+    }
+    grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=3,
+                               scoring='neg_mean_squared_error', n_jobs=-1, error_score='raise')
     grid_search.fit(X_train, y_train)
     best_forest = grid_search.best_estimator_
     print(f"Random Forest Regression score after additional parameters: {round(best_forest.score(X_test, y_test), 2)}")
-    y_pred = regressor_forest.predict(X_test)
-    # Calculate Mean Squared Error (MSE)
-    mse_forest = mean_squared_error(y_test, y_pred)
+    y_pred = best_forest.predict(X_test)
+    y_pred = np.exp(y_pred) - 1
+    mse_forest = mean_squared_error(np.exp(y_test) - 1, y_pred)
     root_mse = np.sqrt(mse_forest)
     print("Random Forest Regression Mean Squared Error:", mse_forest.round(2))
     print(f'Random Forest Regression Root Mean Squared Error: {root_mse.round(2)}')
-    correlation_matrix = df_clean.corr(method='pearson')
-    price_correlation = correlation_matrix['Price'].sort_values(ascending=False)
-    joblib.dump(trained_forest_model, 'models/trained_rf_model.joblib')
-    print(price_correlation)
+    joblib.dump(best_forest, 'models/trained_rf_model.joblib')
 
+    # Visualizations
+    plot_feature_importance(best_forest, feature_names)
+    plot_actual_vs_predicted(np.exp(y_test) - 1, y_pred)
+    plot_residuals(np.exp(y_test) - 1, y_pred)
+
+    return best_forest
+
+# Read dataset and preprocess
 df = pd.read_csv("Data/cleaned_data_with_region_and_price_per_m2.csv")
 df_clean = preprocess_data(df)
-# Split the dataset: Call the function and assign the returned values to variables
+
+# Split dataset
 X_train, X_test, y_train, y_test = split_dataset(df_clean)
+print(f"X_TRAIN columns: {X_train.columns}")
+# Update your call to random_forest_model to include feature_names
+feature_names = X_train.columns
+best_model = random_forest_model(X_train, X_test, y_train, y_test, feature_names)
 
-# X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized = standardize_data_features(df)
-# Commented out standardized train and test data as did not make an impact on score.
-# fit_train_linear_regression(X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized)
-
-fit_train_linear_regression(X_train, X_test, y_train, y_test)
-random_forest_model(X_train, X_test, y_train, y_test)
