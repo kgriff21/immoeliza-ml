@@ -41,10 +41,11 @@ def one_hot_encode_columns(df, columns_to_encode):
         column_data = df[[column]]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
         encoded_data = encoder.fit_transform(column_data)  # fit_transform applies the encoder
-        encoded_df = pd.DataFrame(encoded_data, columns=encoder.get_feature_names_out([column]))
+
+        categories = encoder.categories_[0][1:] # Skip the first category due to 'drop=first'
+        encoded_df = pd.DataFrame(encoded_data, columns=categories, index=df.index)
         df = pd.concat([df, encoded_df], axis=1)
         df = df.drop(column, axis=1)
-    # print(df['Property type'])
     return df  # return outside the loop to process all columns before returning updated DataFrame
 
 def drop_irrelevant_columns(df, columns_to_drop):
@@ -60,18 +61,19 @@ def preprocess_data(df):
     """
     Processes a dataframe including drop irrelevant columns, encode building conditions and column encoding
      ('Property type', 'Province').
-     :param : original df to process
+    :param : original df to process
     :return : cleaned dataframe
      """
     # Drop unnecessary columns not needed for the model
     df = drop_irrelevant_columns(df, ['Property ID', 'Open fire', 'Unnamed: 0', 'Locality data', 'Region',
-                                      'Price per m²',
-                                      'Terrace surface m²', 'Garden area m²'])
+                                      'Price per m²', 'Terrace surface m²', 'Garden area m²'])
     # Encode building condition
     df = encode_building_condition(df)
     # Call one_hot_encode_columns() function
     columns_to_encode = ['Property type', 'Province']
     df_clean = one_hot_encode_columns(df, columns_to_encode)  # update the df on each iteration
+    # **Log-transform the target variable**
+    df_clean['Price'] = np.log(df_clean['Price'] + 1)
     print(df_clean.head(10))
     print(f"Column names cleaned dataset: {df_clean.columns}")
     return df_clean
@@ -147,29 +149,32 @@ def random_forest_model(X_train, X_test, y_train, y_test):
     :param y_test (pandas.Series): Testing target variable
     :return: Creates a .joblib file of the trained linear regression model
     """
-    regressor_forest = RandomForestRegressor(n_estimators=200, random_state=0)
-    trained_forest_model = regressor_forest.fit(X_train, y_train)
-    print(
-        f'Random Forest Regression score before additional parameters: {round(regressor_forest.score(X_test, y_test), 2)}')
-    param_grid = {'n_estimators': [30, 50, 100],
-                  'max_features': [8, 12, 20],
-                  'max_depth': [5, 6, 12]
-                  }
-    grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=5,
-                               scoring='neg_mean_squared_error', return_train_score=True)
+    regressor_forest = RandomForestRegressor(n_estimators=200, random_state=42)
+    param_grid = {
+        'n_estimators': [100, 200],
+        'max_features': ['sqrt', 'log2'],
+        'max_depth': [10, 20, None],
+        'min_samples_split': [2, 10],
+        'min_samples_leaf': [1, 4],
+        'bootstrap': [True]
+    }
+    grid_search = GridSearchCV(estimator=regressor_forest, param_grid=param_grid, cv=3,
+                               scoring='neg_mean_squared_error', n_jobs=-1, error_score='raise')
     grid_search.fit(X_train, y_train)
     best_forest = grid_search.best_estimator_
     print(f"Random Forest Regression score after additional parameters: {round(best_forest.score(X_test, y_test), 2)}")
-    y_pred = regressor_forest.predict(X_test)
+    y_pred = best_forest.predict(X_test)
+    y_pred = np.exp(y_pred) - 1  # Reverse the log transformation
     # Calculate Mean Squared Error (MSE)
-    mse_forest = mean_squared_error(y_test, y_pred)
+    mse_forest = mean_squared_error(np.exp(y_test) - 1, y_pred)  # Use inverse transformed y_test for metrics
     root_mse = np.sqrt(mse_forest)
     print("Random Forest Regression Mean Squared Error:", mse_forest.round(2))
     print(f'Random Forest Regression Root Mean Squared Error: {root_mse.round(2)}')
     correlation_matrix = df_clean.corr(method='pearson')
     price_correlation = correlation_matrix['Price'].sort_values(ascending=False)
-    joblib.dump(trained_forest_model, 'models/trained_rf_model.joblib')
+    joblib.dump(best_forest, 'models/trained_rf_model.joblib')
     print(price_correlation)
+    return best_forest
 
 df = pd.read_csv("Data/cleaned_data_with_region_and_price_per_m2.csv")
 df_clean = preprocess_data(df)
@@ -180,5 +185,5 @@ X_train, X_test, y_train, y_test = split_dataset(df_clean)
 # Commented out standardized train and test data as did not make an impact on score.
 # fit_train_linear_regression(X_train_standardized, X_test_standardized, y_train_standardized, y_test_standardized)
 
-fit_train_linear_regression(X_train, X_test, y_train, y_test)
+# fit_train_linear_regression(X_train, X_test, y_train, y_test)
 random_forest_model(X_train, X_test, y_train, y_test)
